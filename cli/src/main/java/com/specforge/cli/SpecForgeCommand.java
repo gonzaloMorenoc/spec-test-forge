@@ -5,6 +5,9 @@ import com.specforge.core.exporter.RestAssuredProjectExporter;
 import com.specforge.core.generator.TestPlanBuilder;
 import com.specforge.core.llm.LlmProvider;
 import com.specforge.core.model.ApiSpecModel;
+import com.specforge.core.model.ContextModel;
+import com.specforge.core.model.OperationModel;
+import com.specforge.core.parser.ContextParserService;
 import com.specforge.core.parser.OpenApiParserService;
 import com.specforge.core.planner.AiScenarioPlanner;
 import com.specforge.core.validator.CompilationValidator;
@@ -48,17 +51,22 @@ public class SpecForgeCommand implements Runnable {
     @Option(names = {"--baseUrl"}, defaultValue = "http://localhost:8080", description = "Base URL for RestAssured.baseURI")
     private String baseUrl;
 
+    @Option(names = {"--context"}, required = false, description = "Path to business context file (.md/.json).")
+    private String contextPath;
+
     @Override
     public void run() {
         GenerationMode generationMode = parseMode(mode);
 
         Path spec = resolveSpecPath(specPath);
         Path out = resolveOutputPath(outputDir);
+        ContextModel contextModel = resolveContext(contextPath);
 
         OpenApiParserService parser = new OpenApiParserService();
         ApiSpecModel parsed = parser.parse(spec.toString()); // now absolute path
+        applyBusinessContext(parsed, contextModel);
 
-        TestPlanBuilder builder = new TestPlanBuilder(new AiScenarioPlanner(llmProvider));
+        TestPlanBuilder builder = new TestPlanBuilder(new AiScenarioPlanner(llmProvider, contextModel));
         ApiSpecModel plan = builder.build(parsed);
 
         RestAssuredProjectExporter exporter = new RestAssuredProjectExporter(llmProvider);
@@ -69,6 +77,29 @@ public class SpecForgeCommand implements Runnable {
         System.out.println("Mode: " + generationMode);
         System.out.println("Output: " + out.toAbsolutePath());
         System.out.println("Operations: " + plan.getOperations().size());
+    }
+
+    private ContextModel resolveContext(String rawContextPath) {
+        if (rawContextPath == null || rawContextPath.isBlank()) {
+            return new ContextModel();
+        }
+
+        Path contextFile = resolveSpecPath(rawContextPath);
+        ContextParserService contextParser = new ContextParserService();
+        return contextParser.parse(contextFile);
+    }
+
+    private void applyBusinessContext(ApiSpecModel parsed, ContextModel contextModel) {
+        if (parsed == null || parsed.getOperations() == null || contextModel == null) {
+            return;
+        }
+
+        for (OperationModel operation : parsed.getOperations()) {
+            if (operation == null) {
+                continue;
+            }
+            operation.setBusinessRules(new ArrayList<>(contextModel.getRulesForPath(operation.getPath())));
+        }
     }
 
     private Path resolveSpecPath(String raw) {

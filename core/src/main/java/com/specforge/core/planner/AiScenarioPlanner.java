@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.specforge.core.llm.LlmProvider;
+import com.specforge.core.model.ContextModel;
 import com.specforge.core.model.OperationModel;
 import com.specforge.core.prompt.PromptManager;
 
@@ -26,20 +27,33 @@ public class AiScenarioPlanner {
     private final LlmProvider llmProvider;
     private final ObjectMapper objectMapper;
     private final PromptManager promptManager;
+    private final ContextModel contextModel;
     private final Duration timeout;
 
     public AiScenarioPlanner(LlmProvider llmProvider) {
-        this(llmProvider, new PromptManager(), DEFAULT_TIMEOUT);
+        this(llmProvider, new PromptManager(), new ContextModel(), DEFAULT_TIMEOUT);
     }
 
     public AiScenarioPlanner(LlmProvider llmProvider, Duration timeout) {
-        this(llmProvider, new PromptManager(), timeout);
+        this(llmProvider, new PromptManager(), new ContextModel(), timeout);
+    }
+
+    public AiScenarioPlanner(LlmProvider llmProvider, ContextModel contextModel) {
+        this(llmProvider, new PromptManager(), contextModel, DEFAULT_TIMEOUT);
     }
 
     public AiScenarioPlanner(LlmProvider llmProvider, PromptManager promptManager, Duration timeout) {
+        this(llmProvider, promptManager, new ContextModel(), timeout);
+    }
+
+    public AiScenarioPlanner(LlmProvider llmProvider,
+                             PromptManager promptManager,
+                             ContextModel contextModel,
+                             Duration timeout) {
         this.llmProvider = llmProvider;
         this.objectMapper = new ObjectMapper();
         this.promptManager = promptManager != null ? promptManager : new PromptManager();
+        this.contextModel = contextModel != null ? contextModel : new ContextModel();
         this.timeout = timeout != null ? timeout : DEFAULT_TIMEOUT;
     }
 
@@ -70,6 +84,7 @@ public class AiScenarioPlanner {
         String method = safe(operation.getHttpMethod());
         String path = safe(operation.getPath());
         String description = safe(operation.getDescription());
+        String businessRules = formatBusinessRules(path);
 
         return promptManager.render(
                 TEMPLATE_NAME,
@@ -77,6 +92,7 @@ public class AiScenarioPlanner {
                         "httpMethod", method,
                         "path", path,
                         "description", description,
+                        "businessRules", businessRules,
                         "scenarioCount", DEFAULT_SCENARIO_COUNT,
                         "rules", resolveRules()
                 )
@@ -112,5 +128,18 @@ public class AiScenarioPlanner {
             }
         }
         return null;
+    }
+
+    private String formatBusinessRules(String path) {
+        List<String> rules = contextModel.getRulesForPath(path);
+        if (rules.isEmpty()) {
+            return "- No additional business rules provided.";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (String rule : rules) {
+            sb.append("- ").append(rule).append('\n');
+        }
+        return sb.toString().trim();
     }
 }

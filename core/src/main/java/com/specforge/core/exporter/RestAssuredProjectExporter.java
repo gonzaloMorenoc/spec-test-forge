@@ -184,6 +184,7 @@ public class RestAssuredProjectExporter {
                 import java.util.Properties;
 
                 import static io.restassured.RestAssured.given;
+                import static org.hamcrest.Matchers.*;
                 %s
 
                 public class %s {
@@ -208,22 +209,26 @@ public class RestAssuredProjectExporter {
         String safeName = toSafeJavaIdentifier(tc.getName());
         String resolvedPath = resolvePathForHappyPath(op);
         RequestContext requestContext = renderRequestSpec(op);
+        List<String> businessRules = op.getBusinessRules() == null ? List.of() : op.getBusinessRules();
         String llmMethodBody = generateMethodBodyWithLlm(
                 tc.getName(),
                 op.getHttpMethod(),
                 resolvedPath,
                 requestContext.payloadJson(),
                 tc.getExpectedStatus(),
-                responseSchemaResource
+                responseSchemaResource,
+                businessRules
         );
         String methodBody = llmMethodBody == null || llmMethodBody.isBlank()
-                ? renderFallbackMethodBody(op, resolvedPath, tc.getExpectedStatus(), responseSchemaResource)
+                ? renderFallbackMethodBody(op, resolvedPath, tc.getExpectedStatus(), responseSchemaResource, businessRules)
                 : llmMethodBody;
+        String businessRulesComment = renderBusinessRulesComment(businessRules);
 
         return """
                 @Test
                 @DisplayName("%s %s - %s")
                 void %s() {
+                %s
                     RequestSpecification requestSpec = given()
                 %s
                     ;
@@ -234,6 +239,7 @@ public class RestAssuredProjectExporter {
                 op.getPath(),
                 tc.getType(),
                 safeName,
+                indent(businessRulesComment, 8),
                 indent(requestContext.requestSpecCode(), 8),
                 indent(methodBody, 8)
         );
@@ -394,18 +400,26 @@ public class RestAssuredProjectExporter {
     private String renderFallbackMethodBody(OperationModel op,
                                             String resolvedPath,
                                             int expectedStatus,
-                                            String responseSchemaResource) {
+                                            String responseSchemaResource,
+                                            List<String> businessRules) {
         String responseSchemaAssertion = responseSchemaResource == null
                 ? ""
                 : "\n            .body(matchesJsonSchemaInClasspath(\"" + responseSchemaResource + "\"))";
+        String businessRuleAssertions = renderBusinessRuleAssertions(businessRules);
 
         return """
                 requestSpec
                     .when()
                         .request("%s", "%s")
                     .then()
-                        .statusCode(%d)%s;
-                """.formatted(op.getHttpMethod(), resolvedPath, expectedStatus, responseSchemaAssertion).trim();
+                        .statusCode(%d)%s%s;
+                """.formatted(
+                op.getHttpMethod(),
+                resolvedPath,
+                expectedStatus,
+                responseSchemaAssertion,
+                businessRuleAssertions
+        ).trim();
     }
 
     private String generateMethodBodyWithLlm(String scenarioName,
@@ -413,16 +427,21 @@ public class RestAssuredProjectExporter {
                                              String url,
                                              String payloadJson,
                                              int expectedStatus,
-                                             String responseSchemaResource) {
+                                             String responseSchemaResource,
+                                             List<String> businessRules) {
         if (llmProvider == null) {
             return null;
         }
+
+        String businessRulesText = formatBusinessRulesForPrompt(businessRules);
 
         String prompt = """
                 Generate a RestAssured test method body for a scenario: '%s'.
                 Endpoint: %s %s.
                 Input JSON: %s.
                 Expected Status: %d.
+                Additionally validate these business rules in assertions:
+                %s
                 Use strict assertions for the response body.
                 Assume 'requestSpec' is available. Return only the code inside the method.
                 """.formatted(
@@ -430,7 +449,8 @@ public class RestAssuredProjectExporter {
                 safe(method),
                 safe(url),
                 safe(payloadJson),
-                expectedStatus
+                expectedStatus,
+                businessRulesText
         );
 
         if (responseSchemaResource != null && !responseSchemaResource.isBlank()) {
@@ -470,6 +490,77 @@ public class RestAssuredProjectExporter {
             }
         }
         return trimmed;
+    }
+
+    private String renderBusinessRulesComment(List<String> businessRules) {
+        if (businessRules == null || businessRules.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("// Business rules from context:\n");
+        for (String rule : businessRules) {
+            if (rule == null || rule.isBlank()) {
+                continue;
+            }
+            sb.append("// - ").append(rule.trim()).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    private String formatBusinessRulesForPrompt(List<String> businessRules) {
+        if (businessRules == null || businessRules.isEmpty()) {
+            return "- No additional business rules provided.";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String rule : businessRules) {
+            if (rule != null && !rule.isBlank()) {
+                sb.append("- ").append(rule.trim()).append('\n');
+            }
+        }
+        String value = sb.toString().trim();
+        return value.isEmpty() ? "- No additional business rules provided." : value;
+    }
+
+    private String renderBusinessRuleAssertions(List<String> businessRules) {
+        if (businessRules == null || businessRules.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder assertions = new StringBuilder();
+        for (String rule : businessRules) {
+            String assertion = deriveAgeAssertion(rule);
+            if (assertion != null) {
+                assertions.append("\n            ").append(assertion);
+            }
+        }
+        return assertions.toString();
+    }
+
+    private String deriveAgeAssertion(String rule) {
+        if (rule == null || rule.isBlank()) {
+            return null;
+        }
+
+        String text = rule.toLowerCase(Locale.ROOT);
+        boolean mentionsAge = text.contains("age") || text.contains("edad");
+        boolean mentionsAdultRule = text.contains("mayor") || text.contains("older than") || text.contains("adult");
+        if (!mentionsAge && !mentionsAdultRule) {
+            return null;
+        }
+
+        Matcher greaterOrEqual = Pattern.compile("(?:>=|at least|mayor o igual(?: que)?|minimum|minimo|minimo de)\\s*(\\d+)").matcher(text);
+        if (greaterOrEqual.find()) {
+            int value = Integer.parseInt(greaterOrEqual.group(1));
+            return ".body(\"age\", greaterThanOrEqualTo(" + value + "))";
+        }
+
+        Matcher greaterThan = Pattern.compile("(?:>|older than|greater than|mayor(?: que| de)?|over)\\s*(\\d+)").matcher(text);
+        if (greaterThan.find()) {
+            int value = Integer.parseInt(greaterThan.group(1));
+            return ".body(\"age\", greaterThan(" + value + "))";
+        }
+
+        return null;
     }
 
     private String queryLiteralForType(String type) {

@@ -14,6 +14,7 @@ public class OperationModel {
     private ResponseModel preferredResponse;
 
     private List<String> tags = new ArrayList<>();
+    private List<String> businessRules = new ArrayList<>();
     private List<ParamModel> params = new ArrayList<>();
     private List<TestCaseModel> testCases = new ArrayList<>();
 
@@ -40,6 +41,9 @@ public class OperationModel {
 
     public List<String> getTags() { return tags; }
     public void setTags(List<String> tags) { this.tags = tags; }
+
+    public List<String> getBusinessRules() { return businessRules; }
+    public void setBusinessRules(List<String> businessRules) { this.businessRules = businessRules; }
 
     public List<ParamModel> getParams() { return params; }
     public void setParams(List<ParamModel> params) { this.params = params; }
