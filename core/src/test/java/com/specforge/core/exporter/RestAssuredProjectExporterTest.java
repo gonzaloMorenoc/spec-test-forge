@@ -1,5 +1,6 @@
 package com.specforge.core.exporter;
 
+import com.specforge.core.llm.LlmProvider;
 import com.specforge.core.model.ApiSpecModel;
 import com.specforge.core.model.OperationModel;
 import com.specforge.core.model.ParamLocation;
@@ -26,7 +27,7 @@ class RestAssuredProjectExporterTest {
     Path tempDir;
 
     @Test
-    void rendersResolvedPathForRequiredPathParams() throws IOException {
+    void rendersMethodBodyUsingLlmProvider() throws IOException {
         ParamModel id = new ParamModel();
         id.setName("id");
         id.setIn(ParamLocation.PATH);
@@ -51,7 +52,16 @@ class RestAssuredProjectExporterTest {
         ApiSpecModel model = new ApiSpecModel();
         model.setOperations(List.of(operation));
 
-        new RestAssuredProjectExporter().export(
+        LlmProvider llmProvider = prompt -> """
+                requestSpec
+                    .when()
+                    .request("GET", "/users/1")
+                    .then()
+                    .statusCode(200)
+                    .body(matchesJsonSchemaInClasspath("schemas/getUser_200.json"));
+                """;
+
+        new RestAssuredProjectExporter(llmProvider).export(
                 model,
                 tempDir,
                 "com.generated.api",
@@ -64,9 +74,10 @@ class RestAssuredProjectExporterTest {
         Path schemaFile = tempDir.resolve("src/test/resources/schemas/getUser_200.json");
         String schemaJson = Files.readString(schemaFile);
 
-        assertTrue(generated.contains(".request(\"GET\", \"/users/1\")"));
+        assertTrue(generated.contains("RequestSpecification requestSpec = given()"));
         assertTrue(generated.contains(".queryParam(\"verbose\", true)"));
         assertTrue(generated.contains(".body(\"{\\\"name\\\":\\\"value\\\"}\")"));
+        assertTrue(generated.contains(".request(\"GET\", \"/users/1\")"));
         assertTrue(generated.contains("matchesJsonSchemaInClasspath(\"schemas/getUser_200.json\")"));
         assertTrue(generated.contains(".statusCode(200)"));
         assertFalse(schemaJson.isBlank());

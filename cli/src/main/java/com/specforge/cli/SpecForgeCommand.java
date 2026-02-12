@@ -3,6 +3,7 @@ package com.specforge.cli;
 import com.specforge.core.exporter.GenerationMode;
 import com.specforge.core.exporter.RestAssuredProjectExporter;
 import com.specforge.core.generator.TestPlanBuilder;
+import com.specforge.core.llm.LlmProvider;
 import com.specforge.core.llm.OllamaLlmProvider;
 import com.specforge.core.model.ApiSpecModel;
 import com.specforge.core.parser.OpenApiParserService;
@@ -47,10 +48,11 @@ public class SpecForgeCommand implements Runnable {
         OpenApiParserService parser = new OpenApiParserService();
         ApiSpecModel parsed = parser.parse(spec.toString()); // now absolute path
 
-        TestPlanBuilder builder = new TestPlanBuilder(new AiScenarioPlanner(new OllamaLlmProvider()));
+        LlmProvider llmProvider = new OllamaLlmProvider();
+        TestPlanBuilder builder = new TestPlanBuilder(new AiScenarioPlanner(llmProvider));
         ApiSpecModel plan = builder.build(parsed);
 
-        RestAssuredProjectExporter exporter = new RestAssuredProjectExporter();
+        RestAssuredProjectExporter exporter = new RestAssuredProjectExporter(llmProvider);
         exporter.export(plan, out, basePackage, generationMode, baseUrl);
 
         System.out.println("Generated tests successfully.");

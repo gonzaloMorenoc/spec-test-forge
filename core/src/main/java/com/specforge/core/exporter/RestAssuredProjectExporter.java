@@ -3,6 +3,7 @@ package com.specforge.core.exporter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.specforge.core.generator.payload.PayloadGenerator;
+import com.specforge.core.llm.LlmProvider;
 import com.specforge.core.model.ApiSpecModel;
 import com.specforge.core.model.OperationModel;
 import com.specforge.core.model.ParamLocation;
@@ -20,13 +21,28 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class RestAssuredProjectExporter {
 
+    private static final long LLM_TIMEOUT_SECONDS = 20;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final PayloadGenerator payloadGenerator = new PayloadGenerator(1234L);
+    private final LlmProvider llmProvider;
+
+    public RestAssuredProjectExporter() {
+        this(null);
+    }
+
+    public RestAssuredProjectExporter(LlmProvider llmProvider) {
+        this.llmProvider = llmProvider;
+    }
 
     public void export(ApiSpecModel model,
                        Path outputDir,
@@ -158,6 +174,7 @@ public class RestAssuredProjectExporter {
 
                 import io.restassured.RestAssured;
                 import io.restassured.http.ContentType;
+                import io.restassured.specification.RequestSpecification;
                 import org.junit.jupiter.api.BeforeAll;
                 import org.junit.jupiter.api.DisplayName;
                 import org.junit.jupiter.api.Test;
@@ -190,32 +207,35 @@ public class RestAssuredProjectExporter {
     private String renderTestMethod(OperationModel op, TestCaseModel tc, String responseSchemaResource) {
         String safeName = toSafeJavaIdentifier(tc.getName());
         String resolvedPath = resolvePathForHappyPath(op);
-        String requestSpec = renderRequestSpec(op);
-        String responseSchemaAssertion = responseSchemaResource == null
-                ? ""
-                : "\n            .body(matchesJsonSchemaInClasspath(\"" + responseSchemaResource + "\"))";
+        RequestContext requestContext = renderRequestSpec(op);
+        String llmMethodBody = generateMethodBodyWithLlm(
+                tc.getName(),
+                op.getHttpMethod(),
+                resolvedPath,
+                requestContext.payloadJson(),
+                tc.getExpectedStatus(),
+                responseSchemaResource
+        );
+        String methodBody = llmMethodBody == null || llmMethodBody.isBlank()
+                ? renderFallbackMethodBody(op, resolvedPath, tc.getExpectedStatus(), responseSchemaResource)
+                : llmMethodBody;
 
         return """
                 @Test
                 @DisplayName("%s %s - %s")
                 void %s() {
-                    given()
+                    RequestSpecification requestSpec = given()
                 %s
-                    .when()
-                        .request("%s", "%s")
-                    .then()
-                        .statusCode(%d)%s;
+                    ;
+                %s
                 }
                 """.formatted(
                 op.getHttpMethod(),
                 op.getPath(),
                 tc.getType(),
                 safeName,
-                indent(requestSpec, 8),
-                op.getHttpMethod(),
-                resolvedPath,
-                tc.getExpectedStatus(),
-                responseSchemaAssertion
+                indent(requestContext.requestSpecCode(), 8),
+                indent(methodBody, 8)
         );
     }
 
@@ -257,8 +277,9 @@ public class RestAssuredProjectExporter {
         };
     }
 
-    private String renderRequestSpec(OperationModel op) {
+    private RequestContext renderRequestSpec(OperationModel op) {
         StringBuilder sb = new StringBuilder();
+        String payloadJson = "{}";
         sb.append(".accept(ContentType.JSON)\n");
 
         if (op.getParams() != null) {
@@ -282,6 +303,7 @@ public class RestAssuredProjectExporter {
 
             Object payload = payloadGenerator.generate(op.getRequestBody().getSchema());
             String jsonPayload = toJson(payload);
+            payloadJson = jsonPayload;
             sb.append(".contentType(\"")
                     .append(escapeJavaString(contentType))
                     .append("\")\n")
@@ -290,7 +312,88 @@ public class RestAssuredProjectExporter {
                     .append("\")\n");
         }
 
-        return sb.toString().trim();
+        return new RequestContext(sb.toString().trim(), payloadJson);
+    }
+
+    private String renderFallbackMethodBody(OperationModel op,
+                                            String resolvedPath,
+                                            int expectedStatus,
+                                            String responseSchemaResource) {
+        String responseSchemaAssertion = responseSchemaResource == null
+                ? ""
+                : "\n            .body(matchesJsonSchemaInClasspath(\"" + responseSchemaResource + "\"))";
+
+        return """
+                requestSpec
+                    .when()
+                        .request("%s", "%s")
+                    .then()
+                        .statusCode(%d)%s;
+                """.formatted(op.getHttpMethod(), resolvedPath, expectedStatus, responseSchemaAssertion).trim();
+    }
+
+    private String generateMethodBodyWithLlm(String scenarioName,
+                                             String method,
+                                             String url,
+                                             String payloadJson,
+                                             int expectedStatus,
+                                             String responseSchemaResource) {
+        if (llmProvider == null) {
+            return null;
+        }
+
+        String prompt = """
+                Generate a RestAssured test method body for a scenario: '%s'.
+                Endpoint: %s %s.
+                Input JSON: %s.
+                Expected Status: %d.
+                Use strict assertions for the response body.
+                Assume 'requestSpec' is available. Return only the code inside the method.
+                """.formatted(
+                safe(scenarioName),
+                safe(method),
+                safe(url),
+                safe(payloadJson),
+                expectedStatus
+        );
+
+        if (responseSchemaResource != null && !responseSchemaResource.isBlank()) {
+            prompt = prompt + "\nSchema assertion helper available: matchesJsonSchemaInClasspath(\""
+                    + responseSchemaResource + "\").";
+        }
+
+        String finalPrompt = prompt;
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> llmProvider.generate(finalPrompt));
+        try {
+            String generated = future.get(LLM_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return sanitizeGeneratedCode(generated);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (ExecutionException | TimeoutException e) {
+            return null;
+        } finally {
+            future.cancel(true);
+        }
+    }
+
+    private String sanitizeGeneratedCode(String generated) {
+        if (generated == null) {
+            return null;
+        }
+
+        String trimmed = generated.trim();
+        if (trimmed.startsWith("```")) {
+            int firstLineEnd = trimmed.indexOf('\n');
+            if (firstLineEnd > 0) {
+                trimmed = trimmed.substring(firstLineEnd + 1);
+            }
+            int fenceEnd = trimmed.lastIndexOf("```");
+            if (fenceEnd >= 0) {
+                trimmed = trimmed.substring(0, fenceEnd).trim();
+            }
+        }
+        return trimmed;
     }
 
     private String queryLiteralForType(String type) {
@@ -348,6 +451,10 @@ public class RestAssuredProjectExporter {
                 .replace("\"", "\\\"");
     }
 
+    private String safe(String value) {
+        return value == null ? "" : value;
+    }
+
     private String toPascalCase(String s) {
         String[] parts = s.replaceAll("[^a-zA-Z0-9]+", " ").trim().split("\\s+");
         StringBuilder sb = new StringBuilder();
@@ -378,5 +485,8 @@ public class RestAssuredProjectExporter {
             }
         }
         return sb.toString();
+    }
+
+    private record RequestContext(String requestSpecCode, String payloadJson) {
     }
 }
