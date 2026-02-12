@@ -2,6 +2,7 @@ package com.specforge.core.generator.payload;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -44,5 +45,67 @@ class PayloadGeneratorTest {
         List<?> roles = assertInstanceOf(List.class, map.get("roles"));
         assertEquals(1, roles.size());
         assertEquals("admin", roles.getFirst());
+    }
+
+    @Test
+    void usesLlmPayloadWhenJsonIsValid() {
+        Map<String, Object> schema = Map.of(
+                "type", "object",
+                "required", List.of("name"),
+                "properties", Map.of(
+                        "name", Map.of("type", "string")
+                )
+        );
+
+        Object payload = new PayloadGenerator(1234L, prompt -> "{\"name\":\"Ada\"}").generate(schema);
+        Map<String, Object> map = assertInstanceOf(Map.class, payload);
+
+        assertEquals("Ada", map.get("name"));
+    }
+
+    @Test
+    void fallsBackToDeterministicGeneratorWhenLlmReturnsInvalidJson() {
+        Map<String, Object> schema = Map.of(
+                "type", "object",
+                "required", List.of("name"),
+                "properties", Map.of(
+                        "name", Map.of("type", "string", "minLength", 5)
+                )
+        );
+
+        Object payload = new PayloadGenerator(1234L, prompt -> "not-json").generate(schema);
+        Map<String, Object> map = assertInstanceOf(Map.class, payload);
+        String name = assertInstanceOf(String.class, map.get("name"));
+
+        assertTrue(name.length() >= 5);
+    }
+
+    @Test
+    void fallsBackToDeterministicGeneratorWhenLlmTimesOut() {
+        Map<String, Object> schema = Map.of(
+                "type", "object",
+                "required", List.of("name"),
+                "properties", Map.of(
+                        "name", Map.of("type", "string", "minLength", 5)
+                )
+        );
+
+        Object payload = new PayloadGenerator(
+                1234L,
+                prompt -> {
+                    try {
+                        Thread.sleep(200);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return "{\"name\":\"ShouldNotBeUsed\"}";
+                },
+                Duration.ofMillis(50)
+        ).generate(schema);
+
+        Map<String, Object> map = assertInstanceOf(Map.class, payload);
+        String name = assertInstanceOf(String.class, map.get("name"));
+
+        assertTrue(name.length() >= 5);
     }
 }

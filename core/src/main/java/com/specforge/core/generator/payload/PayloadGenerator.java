@@ -1,6 +1,15 @@
 package com.specforge.core.generator.payload;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.specforge.core.llm.LlmProvider;
+
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -9,14 +18,33 @@ import java.util.Random;
 
 public class PayloadGenerator {
 
+    private static final Duration DEFAULT_LLM_TIMEOUT = Duration.ofSeconds(10);
+    private static final String PROMPT_TEMPLATE = """
+            You are a QA Data Generator. Generate a valid JSON object strictly following this schema: %s. Return ONLY the JSON, no markdown.
+            """;
+
     private final Random random;
+    private final ObjectMapper objectMapper;
+    private final LlmProvider llmProvider;
+    private final Duration llmTimeout;
 
     public PayloadGenerator() {
-        this(1234L);
+        this(1234L, null);
     }
 
     public PayloadGenerator(long seed) {
+        this(seed, null);
+    }
+
+    public PayloadGenerator(long seed, LlmProvider llmProvider) {
+        this(seed, llmProvider, DEFAULT_LLM_TIMEOUT);
+    }
+
+    public PayloadGenerator(long seed, LlmProvider llmProvider, Duration llmTimeout) {
         this.random = new Random(seed);
+        this.objectMapper = new ObjectMapper();
+        this.llmProvider = llmProvider;
+        this.llmTimeout = llmTimeout != null ? llmTimeout : DEFAULT_LLM_TIMEOUT;
     }
 
     public Object generate(Map<String, Object> schema) {
@@ -27,6 +55,47 @@ public class PayloadGenerator {
     }
 
     private Object generateBySchema(Map<String, Object> schema) {
+        Object llmGenerated = generateByLlm(schema);
+        if (llmGenerated != null) {
+            return llmGenerated;
+        }
+        return generateBySchemaRandom(schema);
+    }
+
+    private Object generateByLlm(Map<String, Object> schema) {
+        if (llmProvider == null) {
+            return null;
+        }
+
+        try {
+            String schemaJson = objectMapper.writeValueAsString(schema);
+            String prompt = PROMPT_TEMPLATE.formatted(schemaJson);
+
+            String rawResponse = generateWithTimeout(prompt);
+            if (rawResponse == null || rawResponse.isBlank()) {
+                return null;
+            }
+
+            return objectMapper.readValue(rawResponse, Object.class);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (JsonProcessingException | ExecutionException | TimeoutException e) {
+            return null;
+        }
+    }
+
+    private String generateWithTimeout(String prompt)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> llmProvider.generate(prompt));
+        try {
+            return future.get(llmTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        } finally {
+            future.cancel(true);
+        }
+    }
+
+    private Object generateBySchemaRandom(Map<String, Object> schema) {
         List<?> enumValues = list(schema.get("enum"));
         if (!enumValues.isEmpty()) {
             return enumValues.getFirst();
@@ -57,10 +126,10 @@ public class PayloadGenerator {
             if (!required.contains(propertyName)) {
                 // Deterministic but seedable optional inclusion for future extensibility.
                 if (random.nextBoolean()) {
-                    out.put(propertyName, generateBySchema(propertySchema));
+                    out.put(propertyName, generateBySchemaRandom(propertySchema));
                 }
             } else {
-                out.put(propertyName, generateBySchema(propertySchema));
+                out.put(propertyName, generateBySchemaRandom(propertySchema));
             }
         }
 
@@ -75,7 +144,7 @@ public class PayloadGenerator {
         Map<String, Object> itemSchema = map(schema.get("items"));
         List<Object> out = new ArrayList<>();
         for (int i = 0; i < size; i++) {
-            out.add(generateBySchema(itemSchema));
+            out.add(generateBySchemaRandom(itemSchema));
         }
         return out;
     }
