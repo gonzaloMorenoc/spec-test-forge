@@ -95,6 +95,7 @@ public class OpenApiParserService {
         OperationModel om = new OperationModel();
         om.setHttpMethod(method);
         om.setPath(path);
+        om.setDescription(resolveDescription(op));
 
         String operationId = Optional.ofNullable(op.getOperationId())
                 .filter(s -> !s.isBlank())
@@ -111,6 +112,19 @@ public class OpenApiParserService {
         }
 
         ops.add(om);
+    }
+
+    private String resolveDescription(Operation operation) {
+        if (operation == null) {
+            return "";
+        }
+        if (operation.getDescription() != null && !operation.getDescription().isBlank()) {
+            return operation.getDescription();
+        }
+        if (operation.getSummary() != null && !operation.getSummary().isBlank()) {
+            return operation.getSummary();
+        }
+        return "";
     }
 
     private String defaultOperationId(String method, String path) {

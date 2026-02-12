@@ -3,8 +3,10 @@ package com.specforge.cli;
 import com.specforge.core.exporter.GenerationMode;
 import com.specforge.core.exporter.RestAssuredProjectExporter;
 import com.specforge.core.generator.TestPlanBuilder;
+import com.specforge.core.llm.OllamaLlmProvider;
 import com.specforge.core.model.ApiSpecModel;
 import com.specforge.core.parser.OpenApiParserService;
+import com.specforge.core.planner.AiScenarioPlanner;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import java.nio.file.Files;
@@ -45,7 +47,7 @@ public class SpecForgeCommand implements Runnable {
         OpenApiParserService parser = new OpenApiParserService();
         ApiSpecModel parsed = parser.parse(spec.toString()); // now absolute path
 
-        TestPlanBuilder builder = new TestPlanBuilder();
+        TestPlanBuilder builder = new TestPlanBuilder(new AiScenarioPlanner(new OllamaLlmProvider()));
         ApiSpecModel plan = builder.build(parsed);
 
         RestAssuredProjectExporter exporter = new RestAssuredProjectExporter();

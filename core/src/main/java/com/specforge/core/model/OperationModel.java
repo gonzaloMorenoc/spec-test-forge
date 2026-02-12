@@ -8,6 +8,7 @@ public class OperationModel {
     private String operationId;
     private String httpMethod;
     private String path;
+    private String description;
     private int preferredSuccessStatus = 200;
     private RequestBodyModel requestBody;
     private ResponseModel preferredResponse;
@@ -24,6 +25,9 @@ public class OperationModel {
 
     public String getPath() { return path; }
     public void setPath(String path) { this.path = path; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
 
     public int getPreferredSuccessStatus() { return preferredSuccessStatus; }
     public void setPreferredSuccessStatus(int preferredSuccessStatus) { this.preferredSuccessStatus = preferredSuccessStatus; }
