@@ -4,7 +4,6 @@ import com.specforge.core.exporter.GenerationMode;
 import com.specforge.core.exporter.RestAssuredProjectExporter;
 import com.specforge.core.generator.TestPlanBuilder;
 import com.specforge.core.llm.LlmProvider;
-import com.specforge.core.llm.OllamaLlmProvider;
 import com.specforge.core.model.ApiSpecModel;
 import com.specforge.core.parser.OpenApiParserService;
 import com.specforge.core.planner.AiScenarioPlanner;
@@ -28,6 +27,11 @@ import java.util.Map;
 public class SpecForgeCommand implements Runnable {
 
     private static final int SELF_HEALING_MAX_ATTEMPTS = 3;
+    private final LlmProvider llmProvider;
+
+    public SpecForgeCommand(LlmProvider llmProvider) {
+        this.llmProvider = llmProvider;
+    }
 
     @Option(names = {"--spec"}, required = true, description = "Path to OpenAPI spec (yaml/json).")
     private String specPath;
@@ -54,7 +58,6 @@ public class SpecForgeCommand implements Runnable {
         OpenApiParserService parser = new OpenApiParserService();
         ApiSpecModel parsed = parser.parse(spec.toString()); // now absolute path
 
-        LlmProvider llmProvider = new OllamaLlmProvider();
         TestPlanBuilder builder = new TestPlanBuilder(new AiScenarioPlanner(llmProvider));
         ApiSpecModel plan = builder.build(parsed);
 
