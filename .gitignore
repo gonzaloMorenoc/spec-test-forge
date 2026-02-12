@@ -1,0 +1,50 @@
+# Gradle
+.gradle
+build/
+bin/
+*/build/
+*/bin/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# Eclipse
+.metadata
+.classpath
+.project
+.settings/
+*.launch
+
+# VS Code
+.vscode/
+
+# MacOS
+.DS_Store
+
+# Java
+*.class
+*.log
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# virtual machine crash logs, see http://www.oracle.com/technetwork/java/javase/community/error-report-136820.html
+hs_err_pid*
+replay_pid*
+
+# Specific to spec-test-forge
+# If generated-tests are truly temporary/generated, you might want to uncomment this:
+# generated-tests/src/test/java/com/generated/
