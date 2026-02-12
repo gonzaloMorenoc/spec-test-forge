@@ -84,6 +84,40 @@ class RestAssuredProjectExporterTest {
         assertTrue(schemaJson.contains("\"type\":\"object\""));
     }
 
+    @Test
+    void rendersBusinessRuleCommentsAndAssertionsFromContext() throws IOException {
+        TestCaseModel testCase = new TestCaseModel();
+        testCase.setType(TestType.HAPPY_PATH);
+        testCase.setName("createUser_withBusinessRules");
+        testCase.setExpectedStatus(201);
+
+        OperationModel operation = new OperationModel();
+        operation.setOperationId("createUser");
+        operation.setHttpMethod("POST");
+        operation.setPath("/users");
+        operation.setTags(List.of("users"));
+        operation.setTestCases(List.of(testCase));
+        operation.setBusinessRules(List.of("El usuario debe ser mayor de 18"));
+
+        ApiSpecModel model = new ApiSpecModel();
+        model.setOperations(List.of(operation));
+
+        new RestAssuredProjectExporter().export(
+                model,
+                tempDir,
+                "com.generated.api",
+                GenerationMode.EMBEDDED,
+                "http://localhost:8080"
+        );
+
+        Path javaFile = tempDir.resolve("src/test/java/com/generated/api/UsersApiTest.java");
+        String generated = Files.readString(javaFile);
+
+        assertTrue(generated.contains("// Business rules from context:"));
+        assertTrue(generated.contains("// - El usuario debe ser mayor de 18"));
+        assertTrue(generated.contains(".body(\"age\", greaterThan(18))"));
+    }
+
     private ParamModel requiredQueryParam(String name, String type) {
         ParamModel param = new ParamModel();
         param.setName(name);
