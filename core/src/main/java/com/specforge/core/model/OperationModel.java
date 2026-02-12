@@ -9,6 +9,8 @@ public class OperationModel {
     private String httpMethod;
     private String path;
     private int preferredSuccessStatus = 200;
+    private RequestBodyModel requestBody;
+    private ResponseModel preferredResponse;
 
     private List<String> tags = new ArrayList<>();
     private List<ParamModel> params = new ArrayList<>();
@@ -25,6 +27,12 @@ public class OperationModel {
 
     public int getPreferredSuccessStatus() { return preferredSuccessStatus; }
     public void setPreferredSuccessStatus(int preferredSuccessStatus) { this.preferredSuccessStatus = preferredSuccessStatus; }
+
+    public RequestBodyModel getRequestBody() { return requestBody; }
+    public void setRequestBody(RequestBodyModel requestBody) { this.requestBody = requestBody; }
+
+    public ResponseModel getPreferredResponse() { return preferredResponse; }
+    public void setPreferredResponse(ResponseModel preferredResponse) { this.preferredResponse = preferredResponse; }
 
     public List<String> getTags() { return tags; }
     public void setTags(List<String> tags) { this.tags = tags; }

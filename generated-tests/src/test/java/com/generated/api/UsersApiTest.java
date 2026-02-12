@@ -11,6 +11,8 @@ import java.io.InputStream;
 import java.util.Properties;
 
 import static io.restassured.RestAssured.given;
+import static io.restassured.module.jsv.JsonSchemaValidator.matchesJsonSchemaInClasspath;
+
 
 public class UsersApiTest {
 
@@ -26,14 +28,19 @@ public class UsersApiTest {
     }
 
     @Test
-    @DisplayName("GET /users - HAPPY_PATH")
-    void listUsers_happyPath() {
+    @DisplayName("POST /users - HAPPY_PATH")
+    void createUser_happyPath() {
         given()
             .accept(ContentType.JSON)
+            .queryParam("tenantId", 1)
+            .contentType("application/json")
+            .body("{\"name\":\"value\",\"email\":\"user@example.com\",\"age\":18,\"metadata\":{\"active\":true}}")
+
         .when()
-            .request("GET", "/users")
+            .request("POST", "/users")
         .then()
-            .statusCode(200);
+            .statusCode(201)
+                .body(matchesJsonSchemaInClasspath("schemas/createUser_201.json"));
     }
 
     @Test
@@ -41,10 +48,13 @@ public class UsersApiTest {
     void getUser_happyPath() {
         given()
             .accept(ContentType.JSON)
+            .queryParam("includeDetails", true)
+
         .when()
             .request("GET", "/users/1")
         .then()
-            .statusCode(200);
+            .statusCode(200)
+                .body(matchesJsonSchemaInClasspath("schemas/getUser_200.json"));
     }
 
 }

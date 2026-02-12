@@ -1,0 +1,99 @@
+openapi: 3.0.3
+info:
+  title: Sample Happy Path API
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /users:
+    post:
+      operationId: createUser
+      tags: [Users]
+      parameters:
+        - name: tenantId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest'
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "400":
+          description: Bad Request
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: includeDetails
+          in: query
+          required: true
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "404":
+          description: Not Found
+components:
+  schemas:
+    UserCreateRequest:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 40
+        email:
+          type: string
+          format: email
+        age:
+          type: integer
+          minimum: 18
+          maximum: 100
+        role:
+          type: string
+          enum: [admin, reader]
+        metadata:
+          type: object
+          properties:
+            source:
+              type: string
+            active:
+              type: boolean
+    UserResponse:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time

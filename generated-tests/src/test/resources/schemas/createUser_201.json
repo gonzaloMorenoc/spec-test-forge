@@ -1,0 +1,1 @@
+{"type":"object","required":["email","id","name"],"properties":{"id":{"type":"integer"},"name":{"type":"string"},"email":{"type":"string","format":"email"},"createdAt":{"type":"string","format":"date-time"}}}

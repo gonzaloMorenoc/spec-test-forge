@@ -1,5 +1,8 @@
 package com.specforge.core.exporter;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.specforge.core.generator.payload.PayloadGenerator;
 import com.specforge.core.model.ApiSpecModel;
 import com.specforge.core.model.OperationModel;
 import com.specforge.core.model.ParamLocation;
@@ -8,12 +11,22 @@ import com.specforge.core.model.TestCaseModel;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
-import java.util.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class RestAssuredProjectExporter {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final PayloadGenerator payloadGenerator = new PayloadGenerator(1234L);
 
     public void export(ApiSpecModel model,
                        Path outputDir,
@@ -29,22 +42,29 @@ public class RestAssuredProjectExporter {
             }
 
             Path testJavaRoot = outputDir.resolve("src/test/java");
-            Path testResRoot  = outputDir.resolve("src/test/resources");
+            Path testResRoot = outputDir.resolve("src/test/resources");
             Files.createDirectories(testJavaRoot);
             Files.createDirectories(testResRoot);
 
             writeBaseTestConfig(testResRoot, baseUrl);
+            Map<String, String> schemaByOperationId = writeResponseSchemas(model.getOperations(), testResRoot);
 
             Map<String, List<OperationModel>> byTag = groupByPrimaryTag(model.getOperations());
             for (Map.Entry<String, List<OperationModel>> entry : byTag.entrySet()) {
                 String tag = entry.getKey();
                 String className = toPascalCase(tag) + "ApiTest";
-                String java = renderTestClass(basePackage, className, entry.getValue());
+                String java = renderTestClass(basePackage, className, entry.getValue(), schemaByOperationId);
 
                 Path pkgDir = testJavaRoot.resolve(basePackage.replace('.', '/'));
                 Files.createDirectories(pkgDir);
 
-                Files.writeString(pkgDir.resolve(className + ".java"), java, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                Files.writeString(
+                        pkgDir.resolve(className + ".java"),
+                        java,
+                        StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING
+                );
             }
 
         } catch (IOException e) {
@@ -53,10 +73,12 @@ public class RestAssuredProjectExporter {
     }
 
     private void writeStandaloneGradleProject(Path outputDir) throws IOException {
-        Files.writeString(outputDir.resolve("settings.gradle"),
+        Files.writeString(
+                outputDir.resolve("settings.gradle"),
                 "rootProject.name = \"generated-api-tests\"\n",
                 StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING
         );
 
         String buildGradle = """
@@ -73,6 +95,7 @@ public class RestAssuredProjectExporter {
                     testImplementation 'org.junit.jupiter:junit-jupiter'
                     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
                     testImplementation 'io.rest-assured:rest-assured:5.5.0'
+                    testImplementation 'io.rest-assured:json-schema-validator:5.5.0'
                 }
 
                 test {
@@ -80,19 +103,23 @@ public class RestAssuredProjectExporter {
                 }
                 """;
 
-        Files.writeString(outputDir.resolve("build.gradle"),
+        Files.writeString(
+                outputDir.resolve("build.gradle"),
                 buildGradle,
                 StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING
         );
     }
 
     private void writeBaseTestConfig(Path testResRoot, String baseUrl) throws IOException {
         String content = "baseUrl=" + (baseUrl == null ? "http://localhost:8080" : baseUrl) + "\n";
-        Files.writeString(testResRoot.resolve("specforge.properties"),
+        Files.writeString(
+                testResRoot.resolve("specforge.properties"),
                 content,
                 StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING
         );
     }
 
@@ -105,14 +132,26 @@ public class RestAssuredProjectExporter {
         return map;
     }
 
-    private String renderTestClass(String basePackage, String className, List<OperationModel> ops) {
+    private String renderTestClass(String basePackage,
+                                   String className,
+                                   List<OperationModel> ops,
+                                   Map<String, String> schemaByOperationId) {
         StringBuilder methods = new StringBuilder();
+        boolean needsSchemaAssertionImport = false;
 
         for (OperationModel op : ops) {
             for (TestCaseModel tc : op.getTestCases()) {
-                methods.append(renderTestMethod(op, tc)).append("\n");
+                String schemaResource = schemaByOperationId.get(op.getOperationId());
+                methods.append(renderTestMethod(op, tc, schemaResource)).append("\n");
+                if (schemaResource != null) {
+                    needsSchemaAssertionImport = true;
+                }
             }
         }
+
+        String schemaImport = needsSchemaAssertionImport
+                ? "import static io.restassured.module.jsv.JsonSchemaValidator.matchesJsonSchemaInClasspath;\n"
+                : "";
 
         return """
                 package %s;
@@ -128,6 +167,7 @@ public class RestAssuredProjectExporter {
                 import java.util.Properties;
 
                 import static io.restassured.RestAssured.given;
+                %s
 
                 public class %s {
 
@@ -144,25 +184,39 @@ public class RestAssuredProjectExporter {
 
                 %s
                 }
-                """.formatted(basePackage, className, className, indent(methods.toString(), 4));
+                """.formatted(basePackage, schemaImport, className, className, indent(methods.toString(), 4));
     }
 
-    private String renderTestMethod(OperationModel op, TestCaseModel tc) {
+    private String renderTestMethod(OperationModel op, TestCaseModel tc, String responseSchemaResource) {
         String safeName = toSafeJavaIdentifier(tc.getName());
         String resolvedPath = resolvePathForHappyPath(op);
+        String requestSpec = renderRequestSpec(op);
+        String responseSchemaAssertion = responseSchemaResource == null
+                ? ""
+                : "\n            .body(matchesJsonSchemaInClasspath(\"" + responseSchemaResource + "\"))";
 
         return """
                 @Test
                 @DisplayName("%s %s - %s")
                 void %s() {
                     given()
-                        .accept(ContentType.JSON)
+                %s
                     .when()
                         .request("%s", "%s")
                     .then()
-                        .statusCode(%d);
+                        .statusCode(%d)%s;
                 }
-                """.formatted(op.getHttpMethod(), op.getPath(), tc.getType(), safeName, op.getHttpMethod(), resolvedPath, tc.getExpectedStatus());
+                """.formatted(
+                op.getHttpMethod(),
+                op.getPath(),
+                tc.getType(),
+                safeName,
+                indent(requestSpec, 8),
+                op.getHttpMethod(),
+                resolvedPath,
+                tc.getExpectedStatus(),
+                responseSchemaAssertion
+        );
     }
 
     private String resolvePathForHappyPath(OperationModel op) {
@@ -201,6 +255,97 @@ public class RestAssuredProjectExporter {
             case "integer", "number", "int32", "int64", "float", "double" -> "1";
             default -> "1";
         };
+    }
+
+    private String renderRequestSpec(OperationModel op) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(".accept(ContentType.JSON)\n");
+
+        if (op.getParams() != null) {
+            for (ParamModel param : op.getParams()) {
+                if (param == null || param.getIn() != ParamLocation.QUERY || !param.isRequired()) {
+                    continue;
+                }
+                sb.append(".queryParam(\"")
+                        .append(escapeJavaString(param.getName()))
+                        .append("\", ")
+                        .append(queryLiteralForType(param.getType()))
+                        .append(")\n");
+            }
+        }
+
+        if (op.getRequestBody() != null && op.getRequestBody().getSchema() != null) {
+            String contentType = op.getRequestBody().getContentType();
+            if (contentType == null || contentType.isBlank()) {
+                contentType = "application/json";
+            }
+
+            Object payload = payloadGenerator.generate(op.getRequestBody().getSchema());
+            String jsonPayload = toJson(payload);
+            sb.append(".contentType(\"")
+                    .append(escapeJavaString(contentType))
+                    .append("\")\n")
+                    .append(".body(\"")
+                    .append(escapeJavaString(jsonPayload))
+                    .append("\")\n");
+        }
+
+        return sb.toString().trim();
+    }
+
+    private String queryLiteralForType(String type) {
+        String normalized = type == null ? "" : type.toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "boolean" -> "true";
+            case "integer", "number", "int32", "int64", "float", "double" -> "1";
+            default -> "\"value\"";
+        };
+    }
+
+    private Map<String, String> writeResponseSchemas(List<OperationModel> ops, Path testResRoot) throws IOException {
+        Map<String, String> resourceByOperationId = new HashMap<>();
+        Path schemasDir = testResRoot.resolve("schemas");
+        Files.createDirectories(schemasDir);
+
+        for (OperationModel op : ops) {
+            if (op.getPreferredResponse() == null || op.getPreferredResponse().getSchema() == null) {
+                continue;
+            }
+
+            String fileName = sanitizeFileName(op.getOperationId()) + "_" + op.getPreferredResponse().getStatusCode() + ".json";
+            Path schemaPath = schemasDir.resolve(fileName);
+            Files.writeString(
+                    schemaPath,
+                    toJson(op.getPreferredResponse().getSchema()),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            resourceByOperationId.put(op.getOperationId(), "schemas/" + fileName);
+        }
+
+        return resourceByOperationId;
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize generated payload/schema", e);
+        }
+    }
+
+    private String sanitizeFileName(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "operation";
+        }
+        return raw.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private String escapeJavaString(String raw) {
+        return raw
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
     }
 
     private String toPascalCase(String s) {

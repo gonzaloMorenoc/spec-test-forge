@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OpenApiParserServiceTest {
 
@@ -119,5 +120,71 @@ class OpenApiParserServiceTest {
         assertEquals(ParamLocation.HEADER, traceId.getIn());
         assertEquals(false, traceId.isRequired());
         assertEquals("string", traceId.getType());
+    }
+
+    @Test
+    void extractsRequestBodyAndPreferredResponseSchemaResolvingRefs() throws IOException {
+        Path specFile = tempDir.resolve("body-and-schema-spec.yaml");
+        Files.writeString(specFile, """
+                openapi: 3.0.0
+                info:
+                  title: Body API
+                  version: "1.0.0"
+                paths:
+                  /users:
+                    post:
+                      operationId: createUser
+                      requestBody:
+                        required: true
+                        content:
+                          application/json:
+                            schema:
+                              $ref: "#/components/schemas/UserCreateRequest"
+                      responses:
+                        "201":
+                          description: created
+                          content:
+                            application/json:
+                              schema:
+                                $ref: "#/components/schemas/UserResponse"
+                components:
+                  schemas:
+                    UserCreateRequest:
+                      type: object
+                      required: [name]
+                      properties:
+                        name:
+                          type: string
+                          minLength: 3
+                        age:
+                          type: integer
+                          minimum: 18
+                    UserResponse:
+                      type: object
+                      required: [id, name]
+                      properties:
+                        id:
+                          type: integer
+                        name:
+                          type: string
+                """);
+
+        ApiSpecModel model = new OpenApiParserService().parse(specFile.toString());
+        OperationModel op = model.getOperations().stream()
+                .filter(it -> "createUser".equals(it.getOperationId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertNotNull(op.getRequestBody());
+        assertEquals("application/json", op.getRequestBody().getContentType());
+        Map<String, Object> requestSchema = op.getRequestBody().getSchema();
+        assertEquals("object", requestSchema.get("type"));
+        assertTrue(((Map<?, ?>) requestSchema.get("properties")).containsKey("name"));
+
+        assertNotNull(op.getPreferredResponse());
+        assertEquals(201, op.getPreferredResponse().getStatusCode());
+        Map<String, Object> responseSchema = op.getPreferredResponse().getSchema();
+        assertEquals("object", responseSchema.get("type"));
+        assertTrue(((Map<?, ?>) responseSchema.get("properties")).containsKey("id"));
     }
 }
