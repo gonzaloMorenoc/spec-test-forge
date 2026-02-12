@@ -9,6 +9,7 @@ import com.specforge.core.model.OperationModel;
 import com.specforge.core.model.ParamLocation;
 import com.specforge.core.model.ParamModel;
 import com.specforge.core.model.TestCaseModel;
+import com.specforge.core.validator.CompilationValidator;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -16,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,10 +33,12 @@ import java.util.regex.Pattern;
 public class RestAssuredProjectExporter {
 
     private static final long LLM_TIMEOUT_SECONDS = 20;
+    private static final int SELF_HEALING_MAX_ATTEMPTS = 3;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final PayloadGenerator payloadGenerator = new PayloadGenerator(1234L);
     private final LlmProvider llmProvider;
+    private final CompilationValidator compilationValidator = new CompilationValidator();
 
     public RestAssuredProjectExporter() {
         this(null);
@@ -82,6 +86,7 @@ public class RestAssuredProjectExporter {
                         StandardOpenOption.TRUNCATE_EXISTING
                 );
             }
+            validateAndSelfHeal(outputDir);
 
         } catch (IOException e) {
             throw new RuntimeException("Failed to export tests: " + e.getMessage(), e);
@@ -490,6 +495,141 @@ public class RestAssuredProjectExporter {
             }
         }
         return trimmed;
+    }
+
+    private void validateAndSelfHeal(Path outputDir) {
+        CompilationValidator.ValidationResult initialResult = safeValidate(outputDir);
+        if (initialResult.success()) {
+            return;
+        }
+
+        if (llmProvider == null) {
+            throw new IllegalStateException("Generated tests failed compilation: " + initialResult.formatForPrompt());
+        }
+
+        Map<Path, String> baselineSources = snapshotGeneratedSources(outputDir);
+        CompilationValidator.ValidationResult currentResult = initialResult;
+
+        for (int attempt = 1; attempt <= SELF_HEALING_MAX_ATTEMPTS; attempt++) {
+            boolean attempted = applyCompilationFixes(currentResult);
+            if (!attempted) {
+                break;
+            }
+
+            currentResult = safeValidate(outputDir);
+            if (currentResult.success()) {
+                return;
+            }
+        }
+
+        restoreSources(baselineSources);
+        throw new IllegalStateException(
+                "Generated tests failed compilation after self-healing attempts: " + currentResult.formatForPrompt()
+        );
+    }
+
+    private CompilationValidator.ValidationResult safeValidate(Path outputDir) {
+        try {
+            return compilationValidator.validate(outputDir);
+        } catch (RuntimeException ex) {
+            return new CompilationValidator.ValidationResult(
+                    false,
+                    List.of(new CompilationValidator.ValidationError(null, 0, "Validator error: " + ex.getMessage()))
+            );
+        }
+    }
+
+    private boolean applyCompilationFixes(CompilationValidator.ValidationResult result) {
+        Map<Path, List<CompilationValidator.ValidationError>> errorsByFile = result.errorsByFile();
+        if (errorsByFile.isEmpty()) {
+            return false;
+        }
+
+        boolean updated = false;
+        for (Map.Entry<Path, List<CompilationValidator.ValidationError>> entry : errorsByFile.entrySet()) {
+            Path file = entry.getKey();
+            if (file == null || !Files.exists(file)) {
+                continue;
+            }
+
+            try {
+                String originalCode = Files.readString(file);
+                String prompt = """
+                        Tu codigo anterior genero este error de compilacion: %s.
+                        Corrigelo.
+                        Codigo anterior:
+                        %s
+                        """.formatted(formatErrors(entry.getValue()), originalCode);
+
+                String fixedCode = sanitizeGeneratedCode(llmProvider.generate(prompt));
+                if (fixedCode == null || fixedCode.isBlank()) {
+                    continue;
+                }
+                Files.writeString(file, fixedCode, StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING);
+                updated = true;
+            } catch (IOException ignored) {
+                // Best effort self-healing per file.
+            }
+        }
+
+        return updated;
+    }
+
+    private String formatErrors(List<CompilationValidator.ValidationError> errors) {
+        if (errors == null || errors.isEmpty()) {
+            return "Unknown compilation error.";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (CompilationValidator.ValidationError error : errors) {
+            if (sb.length() > 0) {
+                sb.append("\\n");
+            }
+            sb.append("line ")
+                    .append(error.line())
+                    .append(": ")
+                    .append(error.message());
+        }
+        return sb.toString();
+    }
+
+    private Map<Path, String> snapshotGeneratedSources(Path outputDir) {
+        Map<Path, String> snapshot = new LinkedHashMap<>();
+        Path root = outputDir.resolve("src/test/java");
+        if (!Files.exists(root)) {
+            return snapshot;
+        }
+
+        try (var stream = Files.walk(root)) {
+            List<Path> files = stream
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .sorted(Comparator.naturalOrder())
+                    .toList();
+            for (Path file : files) {
+                snapshot.put(file, Files.readString(file));
+            }
+        } catch (IOException ignored) {
+            // Best effort snapshot.
+        }
+
+        return snapshot;
+    }
+
+    private void restoreSources(Map<Path, String> sources) {
+        for (Map.Entry<Path, String> entry : sources.entrySet()) {
+            try {
+                Files.writeString(
+                        entry.getKey(),
+                        entry.getValue(),
+                        StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING
+                );
+            } catch (IOException ignored) {
+                // Best effort restore.
+            }
+        }
     }
 
     private String renderBusinessRulesComment(List<String> businessRules) {

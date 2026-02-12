@@ -171,6 +171,7 @@ public class CompilationValidator {
                         public class ValidatableResponse {
                             public ValidatableResponse statusCode(int statusCode) { return this; }
                             public ValidatableResponse body(Object bodyMatcher) { return this; }
+                            public ValidatableResponse body(String path, Object bodyMatcher) { return this; }
                         }
                         """),
                 new StubSource("io/restassured/module/jsv/JsonSchemaValidator.java", """
@@ -223,6 +224,26 @@ public class CompilationValidator {
                         @Target({ElementType.TYPE, ElementType.METHOD})
                         public @interface DisplayName {
                             String value();
+                        }
+                        """),
+                new StubSource("org/hamcrest/Matchers.java", """
+                        package org.hamcrest;
+
+                        public final class Matchers {
+                            private Matchers() {
+                            }
+
+                            public static Object greaterThan(int value) {
+                                return new Object();
+                            }
+
+                            public static Object greaterThanOrEqualTo(int value) {
+                                return new Object();
+                            }
+
+                            public static Object equalTo(Object value) {
+                                return new Object();
+                            }
                         }
                         """)
         );

@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -116,6 +117,59 @@ class RestAssuredProjectExporterTest {
         assertTrue(generated.contains("// Business rules from context:"));
         assertTrue(generated.contains("// - El usuario debe ser mayor de 18"));
         assertTrue(generated.contains(".body(\"age\", greaterThan(18))"));
+    }
+
+    @Test
+    void selfHealsCompilationErrorsBeforeFinishing() throws IOException {
+        TestCaseModel testCase = new TestCaseModel();
+        testCase.setType(TestType.HAPPY_PATH);
+        testCase.setName("getUser_selfHealing");
+        testCase.setExpectedStatus(200);
+
+        OperationModel operation = new OperationModel();
+        operation.setOperationId("getUser");
+        operation.setHttpMethod("GET");
+        operation.setPath("/users/{id}");
+        operation.setTags(List.of("users"));
+        operation.setParams(List.of(requiredQueryParam("verbose", "boolean")));
+        operation.setTestCases(List.of(testCase));
+
+        ApiSpecModel model = new ApiSpecModel();
+        model.setOperations(List.of(operation));
+
+        AtomicInteger calls = new AtomicInteger();
+        LlmProvider llmProvider = prompt -> {
+            calls.incrementAndGet();
+            if (prompt.contains("Tu codigo anterior genero este error de compilacion")) {
+                String marker = "Codigo anterior:\n";
+                int idx = prompt.indexOf(marker);
+                String previousCode = idx >= 0 ? prompt.substring(idx + marker.length()) : prompt;
+                return previousCode.replace(".body(;", ";");
+            }
+            return """
+                    requestSpec
+                        .when()
+                            .request("GET", "/users/1")
+                        .then()
+                            .statusCode(200)
+                            .body(;
+                    """;
+        };
+
+        new RestAssuredProjectExporter(llmProvider).export(
+                model,
+                tempDir,
+                "com.generated.api",
+                GenerationMode.EMBEDDED,
+                "http://localhost:8080"
+        );
+
+        Path javaFile = tempDir.resolve("src/test/java/com/generated/api/UsersApiTest.java");
+        String generated = Files.readString(javaFile);
+
+        assertTrue(calls.get() >= 2);
+        assertTrue(generated.contains(".statusCode(200)"));
+        assertFalse(generated.contains(".body(;"));
     }
 
     private ParamModel requiredQueryParam(String name, String type) {
