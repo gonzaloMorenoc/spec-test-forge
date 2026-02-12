@@ -1,6 +1,6 @@
 # spec-test-forge
 
-Generador de tests de API a partir de especificaciones OpenAPI/Swagger (`yaml`/`json`).
+Generador de tests de API a partir de especificaciones OpenAPI/Swagger (`yaml`/`json`), con planificación y generación asistida por IA local (Ollama + LangChain4j).
 
 El objetivo del proyecto es producir suites de pruebas en **REST Assured + JUnit 5** de forma **determinista**, con ejecución por CLI y salida orientada a Gradle.
 
@@ -9,20 +9,22 @@ El objetivo del proyecto es producir suites de pruebas en **REST Assured + JUnit
 Fase 1 en progreso, con un MVP ejecutable:
 
 - Parseo de OpenAPI 3 usando `swagger-parser`.
-- Generación de tests happy path (1 por operación).
+- Planificación de escenarios con IA (happy path, security, boundary, negative).
 - Inferencia determinista del status esperado desde el spec.
 - Resolución de `path params` para que endpoints como `/users/{id}` sean ejecutables.
 - Soporte de `query params required` en happy path.
 - Soporte de `requestBody` con payload determinista generado desde schema.
 - Export de schema de respuesta esperada y assertion con `json-schema-validator`.
-
-No usa LLM para decisiones de contrato. Toda la lógica actual sale del spec.
+- Generación del body de métodos de test vía LLM con fallback determinista.
+- Self-healing loop: validación de compilación + reparación automática por IA (hasta 3 intentos).
 
 ## Requisitos
 
 - Java 21 para compilar este repositorio.
 - Gradle Wrapper (`./gradlew`) incluido.
 - macOS/Linux/Windows (con `gradlew.bat`).
+- Ollama local corriendo en `http://localhost:11434`.
+- Modelo recomendado: `deepseek-r1:8b`.
 
 ## Estructura del repositorio
 
@@ -64,6 +66,10 @@ spec-test-forge/
    - Inserta `body` cuando hay request schema.
    - Exporta schemas de respuesta y añade assertions de contrato.
    - En modo standalone escribe `settings.gradle` y `build.gradle`.
+5. **CompilationValidator + Self-Healing**
+   - Compila los `.java` generados usando `JavaCompiler`.
+   - Si falla, captura errores y pide al LLM corregir el archivo completo.
+   - Reintenta validación/corrección hasta 3 intentos.
 
 ## Reglas deterministas relevantes
 
@@ -174,7 +180,8 @@ Actualmente hay pruebas para:
 - extracción de params path/query/header;
 - extracción de request/response schema con `$ref`;
 - generación de payloads dentro de constraints;
-- export con path/query/body/schema assertion.
+- export con path/query/body/schema assertion;
+- validación de compilación en memoria para código generado.
 
 ## Limitaciones actuales
 
@@ -183,17 +190,18 @@ Actualmente hay pruebas para:
 - No hay auth automática (`bearer`, `apiKey`, `basic`) en los tests generados.
 - Validación de contrato enfocada en schema principal de la respuesta preferida.
 
-## Roadmap inmediato
+## Self-healing loop
 
-Próximos incrementos planeados:
+Pipeline de salida:
 
-1. Negativos mecánicos por mutación de payload/query.
-2. Cobertura de auth mínima desde `specforge.properties`.
-3. Más control de reproducibilidad (`--seed`) expuesto por CLI.
-4. Enriquecimiento opcional con LLM, sin romper el pipeline determinista.
+1. Generación inicial de tests.
+2. Validación de compilación con `CompilationValidator`.
+3. Si hay error, prompt de corrección:
+   `Este código falló con este error: {error}. Arréglalo y devuelve el código completo`
+4. Reescritura del archivo y nueva validación.
+5. Máximo 3 intentos.
 
 ## Notas de implementación
 
 - Para evitar problemas frecuentes de `swagger-parser` con rutas relativas tratadas como classpath, el parser normaliza rutas de filesystem a `file://`.
 - La resolución de `--spec` y `--output` contempla explícitamente el caso de ejecución desde `:cli:run`, donde el `cwd` puede quedar en `cli/`.
-

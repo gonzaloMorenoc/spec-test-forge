@@ -8,12 +8,16 @@ import com.specforge.core.llm.OllamaLlmProvider;
 import com.specforge.core.model.ApiSpecModel;
 import com.specforge.core.parser.OpenApiParserService;
 import com.specforge.core.planner.AiScenarioPlanner;
+import com.specforge.core.validator.CompilationValidator;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Command(
         name = "spec-test-forge",
@@ -22,6 +26,8 @@ import java.util.List;
         description = "Generate REST Assured + JUnit5 API tests from an OpenAPI spec."
 )
 public class SpecForgeCommand implements Runnable {
+
+    private static final int SELF_HEALING_MAX_ATTEMPTS = 3;
 
     @Option(names = {"--spec"}, required = true, description = "Path to OpenAPI spec (yaml/json).")
     private String specPath;
@@ -54,6 +60,7 @@ public class SpecForgeCommand implements Runnable {
 
         RestAssuredProjectExporter exporter = new RestAssuredProjectExporter(llmProvider);
         exporter.export(plan, out, basePackage, generationMode, baseUrl);
+        runSelfHealingLoop(out, llmProvider);
 
         System.out.println("Generated tests successfully.");
         System.out.println("Mode: " + generationMode);
@@ -139,5 +146,102 @@ public class SpecForgeCommand implements Runnable {
             sb.append(tried.get(i));
         }
         return sb.toString();
+    }
+
+    private void runSelfHealingLoop(Path outputDir, LlmProvider llmProvider) {
+        CompilationValidator validator = new CompilationValidator();
+
+        for (int attempt = 1; attempt <= SELF_HEALING_MAX_ATTEMPTS; attempt++) {
+            CompilationValidator.ValidationResult result = validator.validate(outputDir);
+            if (result.success()) {
+                System.out.println("Compilation validation passed (attempt " + attempt + ").");
+                return;
+            }
+
+            System.out.println("Compilation validation failed (attempt " + attempt + ").");
+            if (attempt == SELF_HEALING_MAX_ATTEMPTS) {
+                System.out.println("Self-healing retries exhausted.");
+                System.out.println(result.formatForPrompt());
+                return;
+            }
+
+            boolean fixed = applyFixes(outputDir, llmProvider, result);
+            if (!fixed) {
+                System.out.println("Self-healing could not update files.");
+                System.out.println(result.formatForPrompt());
+                return;
+            }
+        }
+    }
+
+    private boolean applyFixes(Path outputDir, LlmProvider llmProvider, CompilationValidator.ValidationResult result) {
+        if (llmProvider == null) {
+            return false;
+        }
+
+        Map<Path, List<CompilationValidator.ValidationError>> errorsByFile = result.errorsByFile();
+        if (errorsByFile.isEmpty()) {
+            return false;
+        }
+
+        boolean updated = false;
+        for (Map.Entry<Path, List<CompilationValidator.ValidationError>> entry : errorsByFile.entrySet()) {
+            Path file = entry.getKey();
+            if (file == null || !file.startsWith(outputDir)) {
+                continue;
+            }
+
+            try {
+                String currentCode = Files.readString(file);
+                String errorText = formatErrors(entry.getValue());
+                String prompt = """
+                        Este código falló con este error: %s.
+                        Arréglalo y devuelve el código completo.
+                        """.formatted(errorText) + "\nCodigo:\n" + currentCode;
+                String fixedCode = sanitizeCodeFence(llmProvider.generate(prompt));
+                if (fixedCode == null || fixedCode.isBlank()) {
+                    continue;
+                }
+                Files.writeString(file, fixedCode);
+                updated = true;
+            } catch (IOException e) {
+                System.out.println("Failed to apply fix for " + file + ": " + e.getMessage());
+            }
+        }
+
+        return updated;
+    }
+
+    private String formatErrors(List<CompilationValidator.ValidationError> errors) {
+        StringBuilder sb = new StringBuilder();
+        for (CompilationValidator.ValidationError error : errors) {
+            if (sb.length() > 0) {
+                sb.append("\\n");
+            }
+            sb.append("line ")
+                    .append(error.line())
+                    .append(": ")
+                    .append(error.message());
+        }
+        return sb.toString();
+    }
+
+    private String sanitizeCodeFence(String generated) {
+        if (generated == null) {
+            return null;
+        }
+
+        String trimmed = generated.trim();
+        if (trimmed.startsWith("```")) {
+            int firstLineEnd = trimmed.indexOf('\n');
+            if (firstLineEnd > 0) {
+                trimmed = trimmed.substring(firstLineEnd + 1);
+            }
+            int fenceEnd = trimmed.lastIndexOf("```");
+            if (fenceEnd >= 0) {
+                trimmed = trimmed.substring(0, fenceEnd).trim();
+            }
+        }
+        return trimmed;
     }
 }
