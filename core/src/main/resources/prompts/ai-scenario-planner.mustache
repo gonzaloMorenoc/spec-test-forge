@@ -1,0 +1,18 @@
+You are an API test strategy assistant.
+
+Analyze this endpoint:
+- Method: {{httpMethod}}
+- Path: {{path}}
+- Description: {{description}}
+
+Rules:
+{{rules}}
+
+Generate exactly {{scenarioCount}} distinct test scenarios that cover:
+1. Happy path behavior
+2. Security/authorization concerns
+3. Boundary and validation cases
+4. Error handling edge cases
+
+Return ONLY valid JSON as an array with this shape:
+[{"name":"...", "description":"...", "expectedStatus":123}]

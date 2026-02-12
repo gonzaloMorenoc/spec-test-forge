@@ -3,6 +3,7 @@ package com.specforge.core.generator.payload;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.specforge.core.llm.LlmProvider;
+import com.specforge.core.prompt.PromptManager;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -19,13 +20,13 @@ import java.util.Random;
 public class PayloadGenerator {
 
     private static final Duration DEFAULT_LLM_TIMEOUT = Duration.ofSeconds(10);
-    private static final String PROMPT_TEMPLATE = """
-            You are a QA Data Generator. Generate a valid JSON object strictly following this schema: %s. Return ONLY the JSON, no markdown.
-            """;
+    private static final String TEMPLATE_NAME = "payload-generator";
+    private static final String DEFAULT_RULES = "Respect types, enum values, and all required fields.";
 
     private final Random random;
     private final ObjectMapper objectMapper;
     private final LlmProvider llmProvider;
+    private final PromptManager promptManager;
     private final Duration llmTimeout;
 
     public PayloadGenerator() {
@@ -41,9 +42,14 @@ public class PayloadGenerator {
     }
 
     public PayloadGenerator(long seed, LlmProvider llmProvider, Duration llmTimeout) {
+        this(seed, llmProvider, new PromptManager(), llmTimeout);
+    }
+
+    public PayloadGenerator(long seed, LlmProvider llmProvider, PromptManager promptManager, Duration llmTimeout) {
         this.random = new Random(seed);
         this.objectMapper = new ObjectMapper();
         this.llmProvider = llmProvider;
+        this.promptManager = promptManager != null ? promptManager : new PromptManager();
         this.llmTimeout = llmTimeout != null ? llmTimeout : DEFAULT_LLM_TIMEOUT;
     }
 
@@ -69,7 +75,13 @@ public class PayloadGenerator {
 
         try {
             String schemaJson = objectMapper.writeValueAsString(schema);
-            String prompt = PROMPT_TEMPLATE.formatted(schemaJson);
+            String prompt = promptManager.render(
+                    TEMPLATE_NAME,
+                    Map.of(
+                            "schemaJson", schemaJson,
+                            "rules", resolveRules()
+                    )
+            );
 
             String rawResponse = generateWithTimeout(prompt);
             if (rawResponse == null || rawResponse.isBlank()) {
@@ -275,5 +287,22 @@ public class PayloadGenerator {
             return n.doubleValue();
         }
         return fallback;
+    }
+
+    private String resolveRules() {
+        return firstNonBlank(
+                System.getProperty("specforge.prompts.payload.rules"),
+                System.getenv("SPECFORGE_PROMPT_PAYLOAD_RULES"),
+                DEFAULT_RULES
+        );
+    }
+
+    private String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 }

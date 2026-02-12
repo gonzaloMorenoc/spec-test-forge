@@ -5,9 +5,11 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.specforge.core.llm.LlmProvider;
 import com.specforge.core.model.OperationModel;
+import com.specforge.core.prompt.PromptManager;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -17,18 +19,27 @@ public class AiScenarioPlanner {
 
     private static final TypeReference<List<TestScenario>> SCENARIO_LIST_TYPE = new TypeReference<>() {};
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(15);
+    private static final String TEMPLATE_NAME = "ai-scenario-planner";
+    private static final int DEFAULT_SCENARIO_COUNT = 5;
+    private static final String DEFAULT_RULES = "Prioritize practical API test coverage and avoid duplicate scenarios.";
 
     private final LlmProvider llmProvider;
     private final ObjectMapper objectMapper;
+    private final PromptManager promptManager;
     private final Duration timeout;
 
     public AiScenarioPlanner(LlmProvider llmProvider) {
-        this(llmProvider, DEFAULT_TIMEOUT);
+        this(llmProvider, new PromptManager(), DEFAULT_TIMEOUT);
     }
 
     public AiScenarioPlanner(LlmProvider llmProvider, Duration timeout) {
+        this(llmProvider, new PromptManager(), timeout);
+    }
+
+    public AiScenarioPlanner(LlmProvider llmProvider, PromptManager promptManager, Duration timeout) {
         this.llmProvider = llmProvider;
         this.objectMapper = new ObjectMapper();
+        this.promptManager = promptManager != null ? promptManager : new PromptManager();
         this.timeout = timeout != null ? timeout : DEFAULT_TIMEOUT;
     }
 
@@ -60,10 +71,16 @@ public class AiScenarioPlanner {
         String path = safe(operation.getPath());
         String description = safe(operation.getDescription());
 
-        return "Analyze this API Endpoint: " + method + " " + path
-                + " with description " + description
-                + ". List 5 distinct test scenarios focusing on security, boundary values, and happy path. "
-                + "Return the list in JSON format: [{name, description, expectedStatus}].";
+        return promptManager.render(
+                TEMPLATE_NAME,
+                Map.of(
+                        "httpMethod", method,
+                        "path", path,
+                        "description", description,
+                        "scenarioCount", DEFAULT_SCENARIO_COUNT,
+                        "rules", resolveRules()
+                )
+        );
     }
 
     private String generateWithTimeout(String prompt)
@@ -78,5 +95,22 @@ public class AiScenarioPlanner {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private String resolveRules() {
+        return firstNonBlank(
+                System.getProperty("specforge.prompts.aiScenario.rules"),
+                System.getenv("SPECFORGE_PROMPT_AI_SCENARIO_RULES"),
+                DEFAULT_RULES
+        );
+    }
+
+    private String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 }
