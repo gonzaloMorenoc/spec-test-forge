@@ -42,7 +42,7 @@ public class UsersApiTest {
         given()
             .accept(ContentType.JSON)
         .when()
-            .request("GET", "/users/{id}")
+            .request("GET", "/users/1")
         .then()
             .statusCode(200);
     }

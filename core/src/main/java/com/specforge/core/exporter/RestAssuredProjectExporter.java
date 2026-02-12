@@ -2,12 +2,16 @@ package com.specforge.core.exporter;
 
 import com.specforge.core.model.ApiSpecModel;
 import com.specforge.core.model.OperationModel;
+import com.specforge.core.model.ParamLocation;
+import com.specforge.core.model.ParamModel;
 import com.specforge.core.model.TestCaseModel;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class RestAssuredProjectExporter {
 
@@ -67,6 +71,7 @@ public class RestAssuredProjectExporter {
                 dependencies {
                     testImplementation platform('org.junit:junit-bom:5.10.2')
                     testImplementation 'org.junit.jupiter:junit-jupiter'
+                    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
                     testImplementation 'io.rest-assured:rest-assured:5.5.0'
                 }
 
@@ -143,9 +148,8 @@ public class RestAssuredProjectExporter {
     }
 
     private String renderTestMethod(OperationModel op, TestCaseModel tc) {
-        // Phase 1 skeleton: we only assert status placeholder and call endpoint without body.
-        // Next step: infer status + payload + schema validation.
         String safeName = toSafeJavaIdentifier(tc.getName());
+        String resolvedPath = resolvePathForHappyPath(op);
 
         return """
                 @Test
@@ -158,7 +162,45 @@ public class RestAssuredProjectExporter {
                     .then()
                         .statusCode(%d);
                 }
-                """.formatted(op.getHttpMethod(), op.getPath(), tc.getType(), safeName, op.getHttpMethod(), op.getPath(), tc.getExpectedStatus());
+                """.formatted(op.getHttpMethod(), op.getPath(), tc.getType(), safeName, op.getHttpMethod(), resolvedPath, tc.getExpectedStatus());
+    }
+
+    private String resolvePathForHappyPath(OperationModel op) {
+        String originalPath = op.getPath() == null ? "/" : op.getPath();
+        Map<String, String> valuesByParam = new HashMap<>();
+
+        if (op.getParams() != null) {
+            for (ParamModel param : op.getParams()) {
+                if (param == null || param.getIn() != ParamLocation.PATH || !param.isRequired()) {
+                    continue;
+                }
+                valuesByParam.put(param.getName(), deterministicValueForType(param.getType()));
+            }
+        }
+
+        Pattern pattern = Pattern.compile("\\{([^}/]+)}");
+        Matcher matcher = pattern.matcher(originalPath);
+        StringBuffer resolved = new StringBuffer();
+        while (matcher.find()) {
+            String paramName = matcher.group(1);
+            String replacement = valuesByParam.getOrDefault(paramName, "1");
+            matcher.appendReplacement(resolved, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(resolved);
+        return resolved.toString();
+    }
+
+    private String deterministicValueForType(String type) {
+        if (type == null) {
+            return "1";
+        }
+
+        String normalized = type.toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "boolean" -> "true";
+            case "integer", "number", "int32", "int64", "float", "double" -> "1";
+            default -> "1";
+        };
     }
 
     private String toPascalCase(String s) {

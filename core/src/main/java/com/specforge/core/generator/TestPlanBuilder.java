@@ -13,7 +13,7 @@ public class TestPlanBuilder {
             TestCaseModel tc = new TestCaseModel();
             tc.setType(TestType.HAPPY_PATH);
             tc.setName(op.getOperationId() + "_happyPath");
-            tc.setExpectedStatus(200); // placeholder; next step we infer from OpenAPI responses deterministically
+            tc.setExpectedStatus(op.getPreferredSuccessStatus());
             op.getTestCases().add(tc);
         }
         return parsed;

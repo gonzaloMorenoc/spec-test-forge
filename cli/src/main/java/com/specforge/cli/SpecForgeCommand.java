@@ -9,8 +9,8 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import java.nio.file.Files;
 import java.nio.file.Path;
-
-import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 @Command(
         name = "spec-test-forge",
@@ -58,42 +58,45 @@ public class SpecForgeCommand implements Runnable {
     }
 
     private Path resolveSpecPath(String raw) {
-        Path p = Path.of(raw);
-        if (p.isAbsolute() && Files.exists(p)) return p;
+        Path input = Path.of(raw);
+        List<Path> tried = new ArrayList<>();
 
-        // 1) relative to current working directory (likely cli/)
-        Path cwd = Path.of(System.getProperty("user.dir"));
-        Path cwdResolved = cwd.resolve(raw).normalize();
-        if (Files.exists(cwdResolved)) return cwdResolved;
+        if (input.isAbsolute()) {
+            Path absolute = input.normalize();
+            tried.add(absolute);
+            if (Files.exists(absolute)) {
+                return absolute;
+            }
+        } else {
+            Path cwd = currentWorkingDir();
+            Path fromCwd = cwd.resolve(input).normalize();
+            tried.add(fromCwd);
+            if (Files.exists(fromCwd)) {
+                return fromCwd;
+            }
 
-        // 2) fallback: relative to repo root (parent of cli module)
-        Path repoRootGuess = cwd.getParent(); // if running inside .../spec-test-forge/cli
-        if (repoRootGuess != null) {
-            Path rootResolved = repoRootGuess.resolve(raw).normalize();
-            if (Files.exists(rootResolved)) return rootResolved;
+            Path repoRoot = repoRootOrCwd(cwd);
+            Path fromRepoRoot = repoRoot.resolve(input).normalize();
+            if (!fromRepoRoot.equals(fromCwd)) {
+                tried.add(fromRepoRoot);
+            }
+            if (Files.exists(fromRepoRoot)) {
+                return fromRepoRoot;
+            }
         }
 
-        // 3) final: try from current module root variations (common case: examples is at repo root)
-        if (repoRootGuess != null) {
-            Path alt = repoRootGuess.resolve("examples").resolve(p.getFileName().toString()).normalize();
-            if (Files.exists(alt)) return alt;
-        }
-
-        throw new IllegalArgumentException("Spec file not found. Tried: " + cwdResolved + " and " +
-                (repoRootGuess != null ? repoRootGuess.resolve(raw).normalize() : "(no repo root guess)"));
+        throw new IllegalArgumentException("Spec file not found: " + raw + "\nTried:\n - " + joinTriedPaths(tried));
     }
 
     private Path resolveOutputPath(String raw) {
-        Path p = Path.of(raw);
-        if (p.isAbsolute()) return p.normalize();
-
-        // Make output relative to repo root (more intuitive)
-        Path cwd = Path.of(System.getProperty("user.dir"));
-        Path repoRootGuess = cwd.getParent(); // if running in cli/
-        if (repoRootGuess != null) {
-            return repoRootGuess.resolve(raw).normalize();
+        Path input = Path.of(raw);
+        if (input.isAbsolute()) {
+            return input.normalize();
         }
-        return cwd.resolve(raw).normalize();
+
+        Path cwd = currentWorkingDir();
+        Path repoRoot = repoRootOrCwd(cwd);
+        return repoRoot.resolve(input).normalize();
     }
 
     private GenerationMode parseMode(String raw) {
@@ -103,5 +106,34 @@ public class SpecForgeCommand implements Runnable {
             case "embedded" -> GenerationMode.EMBEDDED;
             default -> throw new IllegalArgumentException("Invalid --mode. Use: standalone | embedded");
         };
+    }
+
+    private Path currentWorkingDir() {
+        return Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+    }
+
+    private Path repoRootOrCwd(Path cwd) {
+        if (cwd.getFileName() != null && "cli".equals(cwd.getFileName().toString())) {
+            Path parent = cwd.getParent();
+            if (parent != null && Files.exists(parent.resolve("settings.gradle.kts"))) {
+                return parent.normalize();
+            }
+        }
+        return cwd;
+    }
+
+    private String joinTriedPaths(List<Path> tried) {
+        if (tried.isEmpty()) {
+            return "(none)";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < tried.size(); i++) {
+            if (i > 0) {
+                sb.append("\n - ");
+            }
+            sb.append(tried.get(i));
+        }
+        return sb.toString();
     }
 }
