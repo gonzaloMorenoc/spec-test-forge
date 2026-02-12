@@ -61,8 +61,16 @@ public class TestPlanBuilder {
         TestCaseModel tc = new TestCaseModel();
         tc.setType(TestType.HAPPY_PATH);
         tc.setName(op.getOperationId() + "_happyPath");
-        tc.setExpectedStatus(op.getPreferredSuccessStatus());
+        tc.setExpectedStatus(resolveHappyPathStatus(op));
         return tc;
+    }
+
+    private int resolveHappyPathStatus(OperationModel op) {
+        int status = op.getPreferredSuccessStatus();
+        if (status >= 200 && status < 300) {
+            return status;
+        }
+        return 200;
     }
 
     private String resolveScenarioName(OperationModel op, TestScenario scenario, int index) {

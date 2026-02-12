@@ -266,14 +266,14 @@ public class RestAssuredProjectExporter {
 
     private String deterministicValueForType(String type) {
         if (type == null) {
-            return "1";
+            return "value";
         }
 
         String normalized = type.toLowerCase(Locale.ROOT);
         return switch (normalized) {
             case "boolean" -> "true";
             case "integer", "number", "int32", "int64", "float", "double" -> "1";
-            default -> "1";
+            default -> "value";
         };
     }
 
@@ -304,15 +304,91 @@ public class RestAssuredProjectExporter {
             Object payload = payloadGenerator.generate(op.getRequestBody().getSchema());
             String jsonPayload = toJson(payload);
             payloadJson = jsonPayload;
-            sb.append(".contentType(\"")
-                    .append(escapeJavaString(contentType))
-                    .append("\")\n")
-                    .append(".body(\"")
-                    .append(escapeJavaString(jsonPayload))
-                    .append("\")\n");
+            String normalizedContentType = contentType.toLowerCase(Locale.ROOT);
+
+            if (normalizedContentType.contains("multipart/form-data")) {
+                sb.append(".contentType(\"")
+                        .append(escapeJavaString(contentType))
+                        .append("\")\n");
+                appendMultipartSpec(sb, op.getRequestBody().getSchema());
+            } else if (normalizedContentType.contains("application/x-www-form-urlencoded")) {
+                sb.append(".contentType(\"")
+                        .append(escapeJavaString(contentType))
+                        .append("\")\n");
+                appendFormSpec(sb, op.getRequestBody().getSchema());
+            } else {
+                sb.append(".contentType(\"")
+                        .append(escapeJavaString(contentType))
+                        .append("\")\n")
+                        .append(".body(\"")
+                        .append(escapeJavaString(jsonPayload))
+                        .append("\")\n");
+            }
         }
 
         return new RequestContext(sb.toString().trim(), payloadJson);
+    }
+
+    private void appendMultipartSpec(StringBuilder sb, Map<String, Object> schema) {
+        Map<String, Object> properties = asMap(schema.get("properties"));
+        if (properties.isEmpty()) {
+            sb.append(".multiPart(\"file\", \"dummy\")\n");
+            return;
+        }
+
+        for (Map.Entry<String, Object> entry : properties.entrySet()) {
+            String name = entry.getKey();
+            Map<String, Object> propSchema = asMap(entry.getValue());
+            if (isBinaryProperty(propSchema)) {
+                sb.append(".multiPart(\"")
+                        .append(escapeJavaString(name))
+                        .append("\", \"dummy.txt\", \"dummy\".getBytes(), \"text/plain\")\n");
+                continue;
+            }
+
+            String value = literalStringForSchema(propSchema);
+            sb.append(".multiPart(\"")
+                    .append(escapeJavaString(name))
+                    .append("\", \"")
+                    .append(escapeJavaString(value))
+                    .append("\")\n");
+        }
+    }
+
+    private void appendFormSpec(StringBuilder sb, Map<String, Object> schema) {
+        Map<String, Object> properties = asMap(schema.get("properties"));
+        if (properties.isEmpty()) {
+            sb.append(".formParam(\"value\", \"value\")\n");
+            return;
+        }
+
+        for (Map.Entry<String, Object> entry : properties.entrySet()) {
+            String name = entry.getKey();
+            Map<String, Object> propSchema = asMap(entry.getValue());
+            sb.append(".formParam(\"")
+                    .append(escapeJavaString(name))
+                    .append("\", ")
+                    .append(queryLiteralForType(asString(propSchema.get("type"))))
+                    .append(")\n");
+        }
+    }
+
+    private boolean isBinaryProperty(Map<String, Object> schema) {
+        String type = asString(schema.get("type")).toLowerCase(Locale.ROOT);
+        String format = asString(schema.get("format")).toLowerCase(Locale.ROOT);
+        return ("string".equals(type) && "binary".equals(format))
+                || "file".equals(type);
+    }
+
+    private String literalStringForSchema(Map<String, Object> schema) {
+        Object value = payloadGenerator.generate(schema);
+        if (value == null) {
+            return "value";
+        }
+        if (value instanceof Number || value instanceof Boolean || value instanceof String) {
+            return String.valueOf(value);
+        }
+        return toJson(value);
     }
 
     private String renderFallbackMethodBody(OperationModel op,
@@ -453,6 +529,18 @@ public class RestAssuredProjectExporter {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(Object value) {
+        if (value instanceof Map<?, ?> m) {
+            return (Map<String, Object>) m;
+        }
+        return Map.of();
+    }
+
+    private String asString(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private String toPascalCase(String s) {

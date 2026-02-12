@@ -15,7 +15,8 @@ import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
-import io.swagger.v3.parser.OpenAPIV3Parser;
+import io.swagger.parser.OpenAPIParser;
+import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
 
 import java.nio.file.Files;
@@ -27,7 +28,10 @@ public class OpenApiParserService {
     public ApiSpecModel parse(String specLocation) {
         String resolvedLocation = resolveLocation(specLocation);
 
-        SwaggerParseResult result = new OpenAPIV3Parser().readLocation(resolvedLocation, null, null);
+        ParseOptions parseOptions = new ParseOptions();
+        parseOptions.setResolve(true);
+        parseOptions.setResolveFully(true);
+        SwaggerParseResult result = new OpenAPIParser().readLocation(resolvedLocation, null, parseOptions);
 
         if (result == null || result.getOpenAPI() == null) {
             String msg = (result != null && result.getMessages() != null)

@@ -149,6 +149,9 @@ public class CompilationValidator {
                         public class RequestSpecification {
                             public RequestSpecification accept(ContentType contentType) { return this; }
                             public RequestSpecification queryParam(String name, Object value) { return this; }
+                            public RequestSpecification formParam(String name, Object value) { return this; }
+                            public RequestSpecification multiPart(String controlName, Object object) { return this; }
+                            public RequestSpecification multiPart(String controlName, String fileName, byte[] bytes, String mimeType) { return this; }
                             public RequestSpecification contentType(String contentType) { return this; }
                             public RequestSpecification body(String body) { return this; }
                             public RequestSpecification when() { return this; }

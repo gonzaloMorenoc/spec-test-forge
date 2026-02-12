@@ -187,4 +187,55 @@ class OpenApiParserServiceTest {
         assertEquals("object", responseSchema.get("type"));
         assertTrue(((Map<?, ?>) responseSchema.get("properties")).containsKey("id"));
     }
+
+    @Test
+    void parsesSwagger2SpecByConvertingToOpenApiModel() throws IOException {
+        Path specFile = tempDir.resolve("swagger2-spec.json");
+        Files.writeString(specFile, """
+                {
+                  "swagger": "2.0",
+                  "info": {
+                    "title": "Swagger2 API",
+                    "version": "1.0.0"
+                  },
+                  "paths": {
+                    "/pets/{id}": {
+                      "get": {
+                        "operationId": "getPet",
+                        "parameters": [
+                          {
+                            "name": "id",
+                            "in": "path",
+                            "required": true,
+                            "type": "integer"
+                          },
+                          {
+                            "name": "verbose",
+                            "in": "query",
+                            "required": true,
+                            "type": "boolean"
+                          }
+                        ],
+                        "responses": {
+                          "200": {
+                            "description": "ok"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """);
+
+        ApiSpecModel model = new OpenApiParserService().parse(specFile.toString());
+        OperationModel op = model.getOperations().stream()
+                .filter(it -> "getPet".equals(it.getOperationId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("GET", op.getHttpMethod());
+        assertEquals("/pets/{id}", op.getPath());
+        assertEquals(200, op.getPreferredSuccessStatus());
+        assertEquals(2, op.getParams().size());
+    }
 }
