@@ -41,7 +41,7 @@ public class SpecForgeCommand implements Runnable {
     @Option(names = {"--basePackage"}, defaultValue = "com.generated.api", description = "Base Java package for generated tests.")
     private String basePackage;
 
-    @Option(names = {"--mode"}, defaultValue = "standalone", description = "Generation mode: standalone | embedded")
+    @Option(names = {"--mode"}, defaultValue = "new-project", description = "Generation mode: new-project | tests-only")
     private String mode;
 
     @Option(names = {"--baseUrl"}, defaultValue = "http://localhost:8080", description = "Base URL for RestAssured.baseURI")
@@ -142,9 +142,9 @@ public class SpecForgeCommand implements Runnable {
     private GenerationMode parseMode(String raw) {
         String v = raw == null ? "" : raw.trim().toLowerCase();
         return switch (v) {
-            case "standalone" -> GenerationMode.STANDALONE;
-            case "embedded" -> GenerationMode.EMBEDDED;
-            default -> throw new IllegalArgumentException("Invalid --mode. Use: standalone | embedded");
+            case "new-project", "standalone" -> GenerationMode.STANDALONE;
+            case "tests-only", "embedded" -> GenerationMode.EMBEDDED;
+            default -> throw new IllegalArgumentException("Invalid --mode. Use: new-project | tests-only");
         };
     }
 

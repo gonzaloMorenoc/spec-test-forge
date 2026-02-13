@@ -1,0 +1,1 @@
+{"type":"object","properties":{"pagination":{"type":"object","properties":{"limit":{},"offset":{},"count":{},"total":{}}},"data":{"type":"array","items":{"type":"object","properties":{"id":{},"tax_id":{},"tax_name":{},"iata_code":{}}}}}}

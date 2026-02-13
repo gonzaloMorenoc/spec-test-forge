@@ -24,7 +24,7 @@ Fase 1 en progreso, con un MVP ejecutable:
 - Gradle Wrapper (`./gradlew`) incluido.
 - macOS/Linux/Windows (con `gradlew.bat`).
 - Ollama local corriendo en `http://localhost:11434`.
-- Modelo recomendado: `deepseek-r1:8b`.
+- Modelo recomendado: `kimi-k2.5:cloud` (modelo gratuito basado en cloud via Ollama).
 
 ## Estructura del repositorio
 
@@ -105,18 +105,18 @@ Si no hay `2xx`, usa el menor status numérico disponible.
 ### Ejecución típica
 
 ```bash
-./gradlew :cli:run --args="--spec examples/sample-openapi.yaml --output ./generated-tests --mode standalone --basePackage com.generated.api --baseUrl http://localhost:8080"
+./gradlew :cli:run --args="--spec examples/sample-openapi.yaml --output ./generated-tests --mode new-project --basePackage com.generated.api --baseUrl http://localhost:8080"
 ```
 
 ### Ejemplo completo (requestBody + query + schemas)
 
 ```bash
-./gradlew :cli:run --args="--spec examples/sample-openapi-happypath.yaml --output ./generated-tests --mode standalone --basePackage com.generated.api --baseUrl http://localhost:8080"
+./gradlew :cli:run --args="--spec examples/sample-openapi-happypath.yaml --output ./generated-tests --mode new-project --basePackage com.generated.api --baseUrl http://localhost:8080"
 ```
 
 ## Modos de generación
 
-### `standalone`
+### `new-project` (anteriormente `standalone`)
 
 Genera proyecto Gradle completo:
 
@@ -125,7 +125,7 @@ Genera proyecto Gradle completo:
 - `src/test/java/...`
 - `src/test/resources/...`
 
-### `embedded`
+### `tests-only` (anteriormente `embedded`)
 
 Genera solo:
 
@@ -153,7 +153,7 @@ src/test/resources/schemas/<operationId>_<status>.json
 
 ## Dependencias del proyecto generado
 
-En modo standalone se incluyen:
+En modo `new-project` se incluyen:
 
 - `io.rest-assured:rest-assured`
 - `io.rest-assured:json-schema-validator`

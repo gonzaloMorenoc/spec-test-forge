@@ -8,7 +8,7 @@ import java.util.Objects;
 public class OllamaLlmProvider implements LlmProvider {
 
     public static final String DEFAULT_BASE_URL = "http://localhost:11434";
-    public static final String DEFAULT_MODEL = "deepseek-r1:8b";
+    public static final String DEFAULT_MODEL = "kimi-k2.5:cloud";
 
     private final ChatLanguageModel chatModel;
 

@@ -1,0 +1,1 @@
+{"type":"object","properties":{"pagination":{"type":"object","properties":{"limit":{},"offset":{},"count":{},"total":{}}},"data":{"type":"array","items":{"type":"object","properties":{"id":{},"gmt":{},"city_id":{},"iata_code":{},"country_iso2":{},"geoname_id":{},"latitude":{"format":"float"},"longitude":{"format":"float"},"city_name":{},"timezone":{}}}}}}

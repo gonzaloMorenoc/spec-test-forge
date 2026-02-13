@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpecForge - API Test Generator</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                </svg>
+                <span>SpecForge</span>
+            </div>
+
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-view="dashboard">
+                    <span class="icon">📊</span> Dashboard
+                </a>
+                <a href="#" class="nav-item" data-view="generated-files">
+                    <span class="icon">📂</span> Generated Files
+                </a>
+                <a href="#" class="nav-item" data-view="settings">
+                    <span class="icon">⚙️</span> Settings
+                </a>
+            </nav>
+
+            <div class="status-panel">
+                <div class="status-item">
+                    <span class="status-dot success"></span> Java Runtime
+                </div>
+                <div class="status-item">
+                    <span class="status-dot warning" id="ollama-status"></span> Ollama (AI)
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="top-bar">
+                <h1>Dashboard</h1>
+                <div class="user-profile">
+                    <span class="role">Developer</span>
+                    <div class="avatar">DV</div>
+                </div>
+            </header>
+
+            <div class="content-grid">
+                <!-- Configuration Card -->
+                <section class="card config-card">
+                    <div class="card-header">
+                        <h2>Generation Configuration</h2>
+                        <span class="badge">Step 1</span>
+                    </div>
+                    <div class="card-body">
+                        <form id="generate-form">
+                            <div class="form-group">
+                                <label for="spec-select">OpenAPI Specification</label>
+                                <select id="spec-select" name="specFile" required>
+                                    <option value="" disabled selected>Select a spec file...</option>
+                                    <!-- Populated by JS -->
+                                </select>
+                                <small class="hint">Loading from /examples directory</small>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="base-package">Base Package</label>
+                                    <input type="text" id="base-package" name="basePackage" value="com.generated.api"
+                                        placeholder="com.example.api">
+                                </div>
+                                <div class="form-group">
+                                    <label for="base-url">Base URL</label>
+                                    <input type="url" id="base-url" name="baseUrl" value="http://localhost:8080"
+                                        placeholder="http://localhost:8080">
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="output-dir">Output Directory</label>
+                                    <input type="text" id="output-dir" name="outputDir" value="generated-tests"
+                                        readonly>
+                                </div>
+                                <div class="form-group">
+                                    <label for="mode-select">Mode</label>
+                                    <select id="mode-select" name="mode">
+                                        <option value="new-project">Proyecto Completo (Gradle)</option>
+                                        <option value="tests-only">Solo Código de Tests</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary" id="btn-generate">
+                                <span class="btn-text">Generate Tests with AI</span>
+                                <span class="spinner hidden"></span>
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- Operations / Runs Card -->
+                <section class="card actions-card">
+                    <div class="card-header">
+                        <h2>Validation & Reports</h2>
+                        <span class="badge">Step 2</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="action-list">
+                            <div class="action-item">
+                                <div class="action-info">
+                                    <h3>Execute Tests</h3>
+                                    <p>Run generated JUnit tests via Gradle</p>
+                                </div>
+                                <button class="btn btn-secondary" id="btn-run-tests" disabled>
+                                    Run Tests
+                                </button>
+                            </div>
+
+                            <div class="action-item">
+                                <div class="action-info">
+                                    <h3>View Report</h3>
+                                    <p>Open HTML Test Report</p>
+                                </div>
+                                <a href="/report/index.html" target="_blank" class="btn btn-outline"
+                                    id="btn-view-report" disabled>
+                                    Open Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Generated Files View (Hidden by default) -->
+                <section class="card files-card hidden" id="view-generated-files">
+                    <div class="card-header">
+                        <h2>Generated Project Files</h2>
+                        <button class="icon-btn" id="btn-refresh-files" title="Refresh">↻</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="file-list" id="file-list-container">
+                            <div class="empty-state">No files generated yet. Run generation first.</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Settings View (Hidden by default) -->
+                <section class="card settings-card hidden" id="view-settings">
+                    <div class="card-header">
+                        <h2>Application Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <p>Settings are currently configured via the Dashboard generated parameters.</p>
+                        <br>
+                        <h3>System Info</h3>
+                        <ul class="info-list">
+                            <li><strong>Backend Port:</strong> 3000</li>
+                            <li><strong>Ollama Model:</strong> kimi-k2.5:cloud</li>
+                            <li><strong>Gradle Wrapper:</strong> Included</li>
+                        </ul>
+                    </div>
+                </section>
+
+                <!-- Console / Logs Panel -->
+                <section class="card logs-card">
+                    <div class="card-header">
+                        <h2>Live Console Output</h2>
+                        <div class="terminal-controls">
+                            <button class="icon-btn" id="btn-clear-logs" title="Clear Logs">🗑️</button>
+                            <button class="icon-btn" id="btn-toggle-logs" title="Expand/Collapse">⤢</button>
+                        </div>
+                    </div>
+                    <div class="terminal-window" id="terminal-output">
+                        <div class="log-line system">Waiting for commands...</div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

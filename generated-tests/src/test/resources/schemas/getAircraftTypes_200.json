@@ -1,0 +1,1 @@
+{"type":"object","properties":{"pagination":{"type":"object","properties":{"limit":{},"offset":{},"count":{},"total":{}}},"data":{"type":"array","items":{"type":"object","properties":{"id":{},"iata_code":{},"aircraft_name":{},"plane_type_id":{}}}}}}
